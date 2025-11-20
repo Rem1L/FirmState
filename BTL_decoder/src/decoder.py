@@ -84,6 +84,7 @@ def process_btl(data):
 
     buffers = [buf1, buf2, buf3, buf4]
 
+    print("start process_bufn")
     for i, buf in enumerate(buffers):
         buf_start = buf + offset - OFFSET1[BTL_VERSION]
         process_bufn(data[buf_start:])
@@ -94,7 +95,12 @@ def process_btl(data):
 
     # process 'N' SLOG entries
     if BTL_VERSION  == b'1410':
-        slog_start = data[0x11D00:]
+        # slog_start = data[0x1f959:]
+        #find the first SLOG_MAGIC index in the data
+        slog_start = data.find(SLOG_MAGIC)
+        if slog_start == -1:
+            raise BadFileError("SLOG magic not found")
+        slog_start = data[slog_start:]
     else:
         slog_start = data[offset+3*4:]
 
@@ -171,12 +177,14 @@ def read_cstring(data, maxlen=0x200):
 def read_modem_bytes(address, size):
     return read_modem(address, size).tobytes()
 
-def vsprintf(fmt, entry):
+def vsprintf(fmt, entry, param_count):
     argv_resolved = []
-
+    print(fmt)
     res = FORMAT_SPECIFIER.findall(fmt)
 
     for i, r in enumerate(res):
+        if i == param_count:
+            break
         if r[0] == '%' and r[1] == '%':
             continue
 
@@ -228,7 +236,8 @@ def process_slog(data):
             raise BadFileError("Invalid end-of-frame")
 
         eptr = eptr[2:]
-        unk2 = eptr[:10]
+        # unk2 = eptr[:10]
+        # unk2 = eptr[:11]
 
         # TODO: reverse engineer these fields
         # 0000 a1 45 01 840f0000 00
@@ -237,27 +246,53 @@ def process_slog(data):
         # 1c02 a1 45 01 850f0000 00
         # 0000 a1 45 01 850f0000 1e
         # 0000 a1 45 01 860f0000 00
-        flag1, flag2, flag3, flag4, uptime, flag5 = struct.unpack("=HBBBIB", unk2)
+        # flag1, flag2, flag3, flag4, uptime, flag5 = struct.unpack("=HBBBIB", unk2)
+
+
+        # eptr = eptr[OFFSET5[BTL_VERSION]:]
+        # entry = eptr
+        # trace_entry_p = struct.unpack("I", entry[:4])[0]
+        # entry = entry[6:]
+        # entry = entry[1:]
+        # try:
+        #     trace_entry = struct.unpack("7I", read_modem(trace_entry_p, 0x4*7))
+        #     te_magic, te_unk1, te_unk2, te_unk_magic, te_fmt, te_linenum, te_file = trace_entry
+
+        #     fmt = read_cstring(read_modem(te_fmt, 0x200))
+        #     file_name = read_cstring(read_modem(te_file, 0x200))
+
+        #     formatted = vsprintf(fmt, entry)
+        #     print("[%.2f] 0x%08x: [%s:%d] %s" % (uptime, trace_entry_p, file_name, te_linenum, formatted.rstrip()))
+        # except ValueError as e:
+        #     print("[ERROR %s]" % (str(e)))
+        # except:
+        #     continue
+
+        # flag1, flag2, flag3, flag4, uptime, flag5 = struct.unpack("=HBBBIB", unk2)
 
 
         eptr = eptr[OFFSET5[BTL_VERSION]:]
         entry = eptr
         trace_entry_p = struct.unpack("I", entry[:4])[0]
+        print("trace_entry_p: 0x%08x" % trace_entry_p)
         entry = entry[6:]
+        param_count = struct.unpack("B", entry[:1])[0]
         entry = entry[1:]
         try:
+            bytes_data = read_modem(trace_entry_p, 0x4*7)
+            #print the address of the trace_entry_p
+            # print("trace_entry_p: 0x%08x" % trace_entry_p)
             trace_entry = struct.unpack("7I", read_modem(trace_entry_p, 0x4*7))
+            # print("trace_entry[0]: 0x%08x" % trace_entry[0])
             te_magic, te_unk1, te_unk2, te_unk_magic, te_fmt, te_linenum, te_file = trace_entry
-
+            # print("0x%08x" % te_fmt)
             fmt = read_cstring(read_modem(te_fmt, 0x200))
             file_name = read_cstring(read_modem(te_file, 0x200))
-
-            formatted = vsprintf(fmt, entry)
-            print("[%.2f] 0x%08x: [%s:%d] %s" % (uptime, trace_entry_p, file_name, te_linenum, formatted.rstrip()))
+            # print(fmt)
+            formatted = vsprintf(fmt, entry, param_count)
+            print("0x%08x: [%s:%d] %s" % (trace_entry_p, file_name, te_linenum, formatted.rstrip()))
         except ValueError as e:
             print("[ERROR %s]" % (str(e)))
-        except:
-            continue
 
 def main():
     parser = argparse.ArgumentParser()
