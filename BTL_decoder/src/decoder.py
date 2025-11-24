@@ -97,15 +97,19 @@ def process_btl(data):
     if BTL_VERSION  == b'1410':
         # slog_start = data[0x1f959:]
         #find the first SLOG_MAGIC index in the data
-        slog_start = data.find(SLOG_MAGIC)
-        if slog_start == -1:
+        slog_start_addr = data.find(SLOG_MAGIC)
+        if slog_start_addr == -1:
             raise BadFileError("SLOG magic not found")
-        slog_start = data[slog_start:]
+        slog_start = data[slog_start_addr:]
     else:
         slog_start = data[offset+3*4:]
 
+    print("slog_start_addr: 0x%08x" % slog_start_addr)
     while is_likely_slog(slog_start):
         decompressed, skip_amount = process_slog_compressed(slog_start)
+        #save the decompressed data to a file
+        with open("slog_decompressed.bin", "wb") as f:
+            f.write(decompressed)
         process_slog(decompressed)
         slog_start = slog_start[skip_amount:]
 
@@ -224,7 +228,10 @@ def process_slog(data):
             raise BadFileError("Invalid start-of-frame")
 
         # move to next slog entry
-        ptr = ptr[2+size:]
+        required_len = 2 + size
+        if len(ptr) < required_len:
+            raise BadFileError("Truncated SLOG entry (need %u bytes, have %u)" % (required_len, len(ptr)))
+        ptr = ptr[required_len:]
 
         eptr = eptr[4:size+2] # skip header and padding
         sub_length = struct.unpack("H", eptr[:2])[0] # 2-byte sub length
@@ -246,6 +253,9 @@ def process_slog(data):
         # 1c02 a1 45 01 850f0000 00
         # 0000 a1 45 01 850f0000 1e
         # 0000 a1 45 01 860f0000 00
+
+        # 00 00 a1 05 81 fd 8f 52 00 01 00
+        # 00 00 a1 05 81 75 99 52 00 00 00
         # flag1, flag2, flag3, flag4, uptime, flag5 = struct.unpack("=HBBBIB", unk2)
 
 
@@ -275,13 +285,19 @@ def process_slog(data):
         entry = eptr
         trace_entry_p = struct.unpack("I", entry[:4])[0]
         print("trace_entry_p: 0x%08x" % trace_entry_p)
+        # if entry[4:5] != b'\x00\x00' put pointer to next 0x7f entry
+        if entry[4:6] != b'\x00\x00':
+            continue
         entry = entry[6:]
+        if len(entry) < 1:
+            return
         param_count = struct.unpack("B", entry[:1])[0]
+        print(len(entry))
         entry = entry[1:]
         try:
             bytes_data = read_modem(trace_entry_p, 0x4*7)
             #print the address of the trace_entry_p
-            # print("trace_entry_p: 0x%08x" % trace_entry_p)
+            print("trace_entry_p: 0x%08x" % trace_entry_p)
             trace_entry = struct.unpack("7I", read_modem(trace_entry_p, 0x4*7))
             # print("trace_entry[0]: 0x%08x" % trace_entry[0])
             te_magic, te_unk1, te_unk2, te_unk_magic, te_fmt, te_linenum, te_file = trace_entry
